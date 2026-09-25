@@ -1,13 +1,16 @@
-const jwt = require("jsonwebtoken");
-const redis = require("../config/redis");
-
 const validateToken = async (token) => {
-  const cached = await redis.get("auth:" + token);
-  if (cached) return JSON.parse(cached);
-  const decoded = jwt.verify(token, process.env.JWT_SECRET);
-  await redis.setex("auth:" + token, 3600, JSON.stringify(decoded));
-  return decoded;
-};
-
-module.exports = { validateToken };
-// updated: 2026-09-23 build: 1790171904
+  try {
+    const cached = await redis.get("auth:" + token);
+    if (cached) {
+      const decoded = JSON.parse(cached);
+      if (decoded.exp * 1000 < Date.now()) return null;
+      return decoded;
+    }
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ["HS256"] });
+    const ttl = Math.max(1, decoded.exp - Math.floor(Date.now() / 1000));
+    await redis.setex("auth:" + token, Math.min(ttl, 300), JSON.stringify(decoded));
+    return decoded;
+  } catch (err) {
+    return null; // invalid/expired token → caller treats as unauthenticated
+  }
+  };
